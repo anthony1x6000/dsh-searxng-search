@@ -1,0 +1,9 @@
+# Local SearXNG search overlay: keyless `web_search` through your own instance.
+# Usage (no install, no profile edit):
+#   pnpm dsh web --patch ./plugins/searxng-search/cordis.patch.yml
+# The relative entry is anchored to this file, like the inspector source patch.
+# Env: SEARXNG_BASE_URL (default http://127.0.0.1:8888).
+
+- insert:
+    - id: web-search-searxng
+      name: './index.ts'
