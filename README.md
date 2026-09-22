@@ -5,18 +5,10 @@ Keyless `web_search` for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 ## Install
 
 ```sh
-git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search
+git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && printf -- "- insert:\n    - id: web-search-searxng\n      name: '%s/.dsh/plugins/searxng-search/index.ts'\n" "$HOME" >> ~/.dsh/profiles/web/cordis.patch.yml
 ```
 
-Append to `~/.dsh/profiles/web/cordis.patch.yml` (and `headless`, if you use it):
-
-```yaml
-- insert:
-    - id: web-search-searxng
-      name: '/home/USER/.dsh/plugins/searxng-search/index.ts'
-```
-
-Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
+Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat the `printf ... >>` for `headless` if you use it. If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
 
 ## Files
 
