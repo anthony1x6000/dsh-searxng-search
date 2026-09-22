@@ -5,6 +5,10 @@ Keyless `web_search` for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 ## Install
 
 ```sh
+sudo apt update && sudo apt install -y podman
+```
+
+```sh
 git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && printf -- "- insert:\n    - id: web-search-searxng\n      name: '%s/.dsh/plugins/searxng-search/index.ts'\n" "$HOME" >> ~/.dsh/profiles/web/cordis.patch.yml
 ```
 
