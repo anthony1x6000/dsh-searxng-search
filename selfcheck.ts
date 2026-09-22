@@ -7,6 +7,7 @@ import {
   mapSearxngResult,
   resolveEnsureOptions,
   SEARXNG_DEFAULT_CONTAINER,
+  SEARXNG_DEFAULT_IMAGE,
 } from './index.ts'
 
 assert.deepStrictEqual(
@@ -31,10 +32,24 @@ assert.deepStrictEqual(resolveEnsureOptions({}), {
   containerName: SEARXNG_DEFAULT_CONTAINER,
   containerCLI: 'podman',
   startTimeoutMs: 60_000,
+  autoCreate: true,
+  image: SEARXNG_DEFAULT_IMAGE,
+  port: 8888,
+  dataDir: `${process.env.HOME}/.local/share/searxng`,
 })
 assert.deepStrictEqual(
   resolveEnsureOptions({ containerName: 'sxng', containerCLI: 'docker', startTimeoutMs: 5_000 }),
-  { containerName: 'sxng', containerCLI: 'docker', startTimeoutMs: 5_000 },
+  {
+    containerName: 'sxng',
+    containerCLI: 'docker',
+    startTimeoutMs: 5_000,
+    autoCreate: true,
+    image: SEARXNG_DEFAULT_IMAGE,
+    port: 8888,
+    dataDir: `${process.env.HOME}/.local/share/searxng`,
+  },
 )
 assert.strictEqual(resolveEnsureOptions({ startTimeoutMs: -1 }).startTimeoutMs, 60_000)
+assert.strictEqual(resolveEnsureOptions({ port: 99999 }).port, 8888)
+assert.strictEqual(resolveEnsureOptions({ autoCreate: false }).autoCreate, false)
 console.log('searxng-search selfcheck: ok')

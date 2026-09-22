@@ -25,6 +25,9 @@
 // Type-only Cordis/web imports: erased at load, so this file runs straight
 // from a profile patch through the CLI tsx loader with no package install.
 import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebSearchRequest, WebSearchResult, WebSearchSource } from '@deepseek-ai/dsh-web'
@@ -50,6 +53,15 @@ export const SEARXNG_DEFAULT_CLI = 'podman'
 /** Default budget for on-demand start + readiness (ms). */
 export const SEARXNG_DEFAULT_START_TIMEOUT_MS = 60_000
 
+/** Default container image pulled on first use. */
+export const SEARXNG_DEFAULT_IMAGE = 'docker.io/searxng/searxng:latest'
+
+/** Default host port the container binds (loopback only). */
+export const SEARXNG_DEFAULT_PORT = 8888
+
+/** Default data dir holding `settings/settings.yml` and the image cache. */
+export const SEARXNG_DEFAULT_DATA_DIR = '.local/share/searxng'
+
 /** Plugin config: every field optional, env fills the gaps. */
 export interface Config {
   /** SearXNG base URL. Falls back to `$SEARXNG_BASE_URL`, then localhost. */
@@ -60,6 +72,12 @@ export interface Config {
   containerCLI?: string
   /** Budget for on-demand start + readiness. Falls back to `$SEARXNG_START_TIMEOUT_MS`, default 60000. */
   startTimeoutMs?: number
+  /** Create the container when missing (first boot on a new system). Default true. */
+  autoCreate?: boolean
+  /** Image pulled on first creation. Falls back to `$SEARXNG_IMAGE`, default docker.io latest. */
+  image?: string
+  /** Host port the container binds. Falls back to `$SEARXNG_PORT`, default 8888. */
+  port?: number
 }
 
 /** Resolved on-demand-start options (env and constant defaults applied). */
@@ -70,6 +88,14 @@ export interface EnsureSearxngOptions {
   containerCLI: string
   /** Budget for start + readiness (ms). */
   startTimeoutMs: number
+  /** Create the container when missing (first boot on a new system). */
+  autoCreate: boolean
+  /** Image pulled on first creation. */
+  image: string
+  /** Host port the container binds. */
+  port: number
+  /** Data dir holding `settings/settings.yml` and the image cache. */
+  dataDir: string
 }
 
 /**
@@ -80,12 +106,20 @@ export interface EnsureSearxngOptions {
 export function resolveEnsureOptions(config: Config = {}): EnsureSearxngOptions {
   const startTimeoutMs = config.startTimeoutMs
     ?? Number(process.env.SEARXNG_START_TIMEOUT_MS ?? SEARXNG_DEFAULT_START_TIMEOUT_MS)
+  const port = config.port ?? Number(process.env.SEARXNG_PORT ?? SEARXNG_DEFAULT_PORT)
   return {
     containerName: config.containerName ?? process.env.SEARXNG_CONTAINER ?? SEARXNG_DEFAULT_CONTAINER,
     containerCLI: config.containerCLI ?? process.env.SEARXNG_CLI ?? SEARXNG_DEFAULT_CLI,
     startTimeoutMs: Number.isInteger(startTimeoutMs) && (startTimeoutMs as number) > 0
       ? startTimeoutMs as number
       : SEARXNG_DEFAULT_START_TIMEOUT_MS,
+    autoCreate: config.autoCreate ?? process.env.SEARXNG_AUTO_CREATE !== '0',
+    image: config.image ?? process.env.SEARXNG_IMAGE ?? SEARXNG_DEFAULT_IMAGE,
+    port: Number.isInteger(port) && (port as number) > 0 && (port as number) < 65536
+      ? port as number
+      : SEARXNG_DEFAULT_PORT,
+    dataDir: process.env.SEARXNG_DATA_DIR
+      ?? `${process.env.HOME ?? '~'}/${SEARXNG_DEFAULT_DATA_DIR}`,
   }
 }
 
@@ -179,8 +213,16 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /** True for a failed spawn of a missing executable (CLI not installed). */
-function isEnoent(error: unknown): boolean {
+function isEnoentCli(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT'
+}
+
+/** True when a `start`/`inspect` failure means the container does not exist. */
+function isMissingContainer(error: unknown): boolean {
+  const stderr = typeof error === 'object' && error !== null
+    ? String((error as { stderr?: unknown }).stderr ?? (error as { message?: unknown }).message ?? error)
+    : String(error)
+  return /no such container|no container with name/i.test(stderr)
 }
 
 /**
@@ -213,36 +255,101 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
+ * Write the minimal `settings.yml` (secret + `json` format) when absent, then
+ * `run` the container. Mirrors `searxng-podman.sh`; kept here so a new system
+ * needs no manual setup step.
+ */
+async function createContainer(
+  cli: string,
+  options: EnsureSearxngOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  mkdirSync(join(options.dataDir, 'settings'), { recursive: true })
+  mkdirSync(join(options.dataDir, 'data'), { recursive: true })
+  const settingsPath = join(options.dataDir, 'settings', 'settings.yml')
+  let hasSettings = false
+  try {
+    hasSettings = readFileSync(settingsPath, 'utf8').length > 0
+  } catch {
+    hasSettings = false
+  }
+  if (!hasSettings) {
+    const secret = process.env.SEARXNG_SECRET ?? randomBytes(32).toString('hex')
+    writeFileSync(settingsPath,
+      '# Minimal SearXNG settings for local harness use (written by dsh-searxng-search).\n'
+      + '# Full reference: https://docs.searxng.org/admin/settings/settings.html\n'
+      + 'use_default_settings: true\n'
+      + 'server:\n'
+      + `  secret_key: "${secret}"\n`
+      + '  limiter: false\n'
+      + '  image_proxy: false\n'
+      + 'search:\n'
+      + '  formats:\n'
+      + '    - html\n'
+      + '    - json\n')
+  }
+  try {
+    await execFileAsync(cli, [
+      'run', '-d', '--name', options.containerName, '--restart', 'unless-stopped',
+      '-p', `127.0.0.1:${options.port}:8080`,
+      '-v', `${join(options.dataDir, 'settings')}:/etc/searxng:z`,
+      '-v', `${join(options.dataDir, 'data')}:/var/cache/searxng:z`,
+      '-e', `BASE_URL=http://127.0.0.1:${options.port}/`,
+      options.image,
+    ], { signal })
+  } catch (error: unknown) {
+    throwIfAborted(signal)
+    throw new SearxngError(
+      `SearXNG container "${options.containerName}" failed to create`
+      + ` (image pull of ${options.image} may need network): ${String(error)}`,
+      'WEB_PROVIDER_ERROR',
+      { cause: error },
+    )
+  }
+}
+
+/**
  * Run `<cli> start <container>`, trying the alternate CLI when the preferred
  * one is not installed. A container that exists but fails to start keeps its
- * stderr; a missing container names the setup script instead.
+ * stderr; a missing container is created (or names the setup script when
+ * `autoCreate` is off).
  */
-async function startContainer(options: EnsureSearxngOptions, signal?: AbortSignal): Promise<void> {
+async function startContainer(
+  options: EnsureSearxngOptions,
+  signal?: AbortSignal,
+): Promise<{ cli: string }> {
   const clis = options.containerCLI === 'docker' ? ['docker', 'podman'] : ['podman', 'docker']
   let lastError: unknown
   for (const cli of clis) {
     try {
       await execFileAsync(cli, ['start', options.containerName], { signal })
-      return
+      return { cli }
     } catch (error: unknown) {
       throwIfAborted(signal)
       lastError = error
-      if (!isEnoent(error)) {
-        const exists = await execFileAsync(cli, ['inspect', options.containerName], { signal })
+      // A missing CLI binary is an environment problem on this rung — try the
+      // alternate CLI before giving up.
+      if (isEnoentCli(error)) continue
+      const exists = isMissingContainer(error)
+        ? false
+        : await execFileAsync(cli, ['inspect', options.containerName], { signal })
           .then(() => true, () => false)
-        if (!exists) {
+      if (!exists) {
+        if (!options.autoCreate) {
           throw new SearxngError(
             `SearXNG container "${options.containerName}" does not exist; create it with searxng-podman.sh`,
             'WEB_PROVIDER_ERROR',
             { cause: error },
           )
         }
-        throw new SearxngError(
-          `SearXNG container "${options.containerName}" failed to start: ${String(error)}`,
-          'WEB_PROVIDER_ERROR',
-          { cause: error },
-        )
+        await createContainer(cli, options, signal)
+        return { cli }
       }
+      throw new SearxngError(
+        `SearXNG container "${options.containerName}" failed to start: ${String(error)}`,
+        'WEB_PROVIDER_ERROR',
+        { cause: error },
+      )
     }
   }
   throw new SearxngError(
