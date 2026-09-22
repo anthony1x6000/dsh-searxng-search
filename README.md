@@ -5,26 +5,18 @@ Keyless `web_search` for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 ## Install
 
 ```sh
-# 1. Clone (private repo — you need access):
-git clone https://github.com/anthony1x6000/dsh-searxng-search.git
-
-# 2. Create + start the SearXNG container (podman preferred, docker fallback):
-bash dsh-searxng-search/searxng-podman.sh
-
-# 3a. Zero-flag install (recommended) — add to each profile once:
-# ($DSH_HOME/profiles/<name>/cordis.patch.yml; `dsh web` / `dsh headless` ...)
-- insert:
-    - id: web-search-searxng
-      name: '<path-to>/dsh-searxng-search/index.ts'
-
-# 3b. Or per-boot overlay, no profile edit:
-SEARXNG_BASE_URL=http://127.0.0.1:8888 pnpm dsh web \
-  --patch ./dsh-searxng-search/cordis.patch.yml
+git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search
 ```
 
-First boot on a new system needs nothing else: a missing container is created (settings + pull + run) on first search, then started on demand after reboots. Step 2 is only the fast path — skip it and the first search takes ~1–2 min for the image pull instead. If DeepSeek search is also configured, pin the provider by adding `searchProvider: searxng-local` to the `dsh-web` row config.
+Append to `~/.dsh/profiles/web/cordis.patch.yml` (and `headless`, if you use it):
 
-To make it permanent, copy `cordis.patch.yml`'s two lines into your profile's `cordis.patch.yml` (`$DSH_HOME/profiles/<name>/cordis.patch.yml`).
+```yaml
+- insert:
+    - id: web-search-searxng
+      name: '/home/USER/.dsh/plugins/searxng-search/index.ts'
+```
+
+Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
 
 ## Files
 
