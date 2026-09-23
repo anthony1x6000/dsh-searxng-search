@@ -31,6 +31,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: pnpm add -g @deepseek-ai/dsh
+      - run: pnpm add -g @deepseek-ai/dsh@0.1.5-rc.3
       - run: dsh plugin --profile ci-searxng add .
       - run: dsh --profile ci-searxng --dump-config | grep searxng-local
+      # Tarball installs only see `files`-whitelisted content: prove the
+      # published payload mounts the layer on its own.
+      - run: pnpm pack --pack-destination /tmp/searxng-pkg
+      - run: dsh plugin --profile ci-searxng-pack add /tmp/searxng-pkg/*.tgz
+      - run: dsh --profile ci-searxng-pack --dump-config | grep searxng-local

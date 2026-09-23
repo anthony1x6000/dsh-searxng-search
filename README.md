@@ -24,7 +24,7 @@ Verify the layer without booting:
 dsh --profile web --dump-config | grep -B 1 -A 4 searxng
 ```
 
-Then restart `dsh web` for the new bundle layer to take effect. The first search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots.
+Then restart `dsh web` for the new bundle layer to take effect. Build artifacts (`lib/`) are committed, so installing from git runs no build and needs no pnpm `allowBuilds` approval. The first search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots.
 
 The bundle pins `searchProvider: searxng-local` in its own layer because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. Your profile patch can still override it. To go back to hosted search, `dsh plugin --profile web remove dsh-searxng-search` (then restart) and the layer — pin included — is gone.
 
