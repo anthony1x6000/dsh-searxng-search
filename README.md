@@ -4,27 +4,16 @@ Keyless `web_search` for [DeepSeek Harness](https://github.com/deepseek-ai/deeps
 
 ## Install
 
+One-liner for `podman`:
+
 ```sh
 sudo apt update && sudo apt install -y podman
 ```
 
+One-liner for the plugin (clone + patch the `web` profile: registers `searxng-local` and pins it as the search provider):
+
 ```sh
-git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && node -e '
-const fs = require("fs"), path = require("path");
-const p = path.join(process.env.HOME, ".dsh/profiles/web/cordis.patch.yml");
-fs.mkdirSync(path.dirname(p), { recursive: true });
-let c = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
-const entry = "    - id: web-search-searxng\n      name: '\''" + path.join(process.env.HOME, ".dsh/plugins/searxng-search/index.ts") + "'\''\n";
-if (!c.includes("id: web-search-searxng")) {
-  c = c.replace(/^\[\]\s*$/m, "");
-  c = c.includes("- insert:\n") ? c.replace("- insert:\n", "- insert:\n" + entry) : (c.trim() ? c.trim() + "\n" : "") + "- insert:\n" + entry;
-}
-if (!c.includes("searchProvider: searxng-local")) {
-  if (!c.endsWith("\n")) c += "\n";
-  c += "- id: web\n  config:\n    searchProvider: searxng-local\n    fetchProvider: http\n";
-}
-fs.writeFileSync(p, c);
-'
+git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && node -e 'const fs=require("fs"),path=require("path");const p=path.join(process.env.HOME,".dsh/profiles/web/cordis.patch.yml");fs.mkdirSync(path.dirname(p),{recursive:true});let c=fs.existsSync(p)?fs.readFileSync(p,"utf8"):"";const entry="    - id: web-search-searxng\n      name: '\''"+path.join(process.env.HOME,".dsh/plugins/searxng-search/index.ts")+"'\''\n";if(!c.includes("id: web-search-searxng")){c=c.replace(/^\[\]\s*$/m,"");c=c.includes("- insert:\n")?c.replace("- insert:\n","- insert:\n"+entry):(c.trim()?c.trim()+"\n":"")+"- insert:\n"+entry;}if(!c.includes("searchProvider: searxng-local")){if(!c.endsWith("\n"))c+="\n";c+="- id: web\n  config:\n    searchProvider: searxng-local\n    fetchProvider: http\n";}fs.writeFileSync(p,c);'
 ```
 
 Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat for `headless` profile if you use it (swap `web` with `headless` in the path). The installer pins `searchProvider: searxng-local` because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. To go back to hosted search, drop the `- id: web` block from the patch file.
