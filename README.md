@@ -9,10 +9,21 @@ sudo apt update && sudo apt install -y podman
 ```
 
 ```sh
-git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && printf -- "- insert:\n    - id: web-search-searxng\n      name: '%s/.dsh/plugins/searxng-search/index.ts'\n" "$HOME" >> ~/.dsh/profiles/web/cordis.patch.yml
+git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && node -e '
+const fs = require("fs"), path = require("path");
+const p = path.join(process.env.HOME, ".dsh/profiles/web/cordis.patch.yml");
+fs.mkdirSync(path.dirname(p), { recursive: true });
+let c = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+const entry = "    - id: web-search-searxng\n      name: '\''" + path.join(process.env.HOME, ".dsh/plugins/searxng-search/index.ts") + "'\''\n";
+if (!c.includes("id: web-search-searxng")) {
+  c = c.replace(/^\[\]\s*$/m, "");
+  c = c.includes("- insert:\n") ? c.replace("- insert:\n", "- insert:\n" + entry) : (c.trim() ? c.trim() + "\n" : "") + "- insert:\n" + entry;
+  fs.writeFileSync(p, c);
+}
+'
 ```
 
-Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat the `printf ... >>` for `headless` if you use it. If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
+Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat for `headless` profile if you use it (swap `web` with `headless` in the path). If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
 
 ## Files
 
