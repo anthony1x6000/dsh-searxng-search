@@ -1,0 +1,41 @@
+{
+  "name": "dsh-searxng-search",
+  "version": "0.1.0",
+  "description": "Keyless web_search for DeepSeek Harness via a self-hosted SearXNG instance",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.d.ts",
+    "cordis.patch.yml",
+    "searxng-podman.sh",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "selfcheck": "node --experimental-strip-types selfcheck.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anthony1x6000/dsh-searxng-search.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0",
+    "@deepseek-ai/dsh-web": "^0.0.1-rc.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,31 +1,45 @@
 # dsh-searxng-search
 
+[![ci](https://github.com/anthony1x6000/dsh-searxng-search/actions/workflows/ci.yml/badge.svg)](https://github.com/anthony1x6000/dsh-searxng-search/actions/workflows/ci.yml)
+
 Keyless `web_search` for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) via a self-hosted [SearXNG](https://docs.searxng.org/) instance. A thin `ctx.web` provider (`searxng-local`) plus on-demand `podman start` — no API key, no MCP hop.
 
 ## Install
 
-One-liner for `podman`:
+One-liner for `podman` (system dependency, outside pnpm):
 
 ```sh
 sudo apt update && sudo apt install -y podman
 ```
 
-One-liner for the plugin (clone + patch the `web` profile: registers `searxng-local` and pins it as the search provider):
+Install the bundle into your `web` profile (pnpm only — no profile hand-editing):
 
 ```sh
-git clone https://github.com/anthony1x6000/dsh-searxng-search.git ~/.dsh/plugins/searxng-search && mkdir -p ~/.dsh/profiles/web && touch ~/.dsh/profiles/web/cordis.patch.yml && sed -i '/^\[\][[:space:]]*$/d' ~/.dsh/profiles/web/cordis.patch.yml && { grep -q 'id: web-search-searxng' ~/.dsh/profiles/web/cordis.patch.yml || printf -- "- insert:\n    - id: web-search-searxng\n      name: '%s/.dsh/plugins/searxng-search/index.ts'\n" "$HOME" >> ~/.dsh/profiles/web/cordis.patch.yml; } && { grep -q 'searchProvider: searxng-local' ~/.dsh/profiles/web/cordis.patch.yml || printf -- "- id: web\n  config:\n    searchProvider: searxng-local\n    fetchProvider: http\n" >> ~/.dsh/profiles/web/cordis.patch.yml; }
+dsh plugin --profile web add "github:anthony1x6000/dsh-searxng-search#main"
 ```
 
-Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat for `headless` profile if you use it (swap `web` with `headless` in the path). The installer pins `searchProvider: searxng-local` because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. To go back to hosted search, drop the `- id: web` block from the patch file.
+Verify the layer without booting:
+
+```sh
+dsh --profile web --dump-config | grep -B 1 -A 4 searxng
+```
+
+Then restart `dsh web` for the new bundle layer to take effect. The first search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots.
+
+The bundle pins `searchProvider: searxng-local` in its own layer because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. Your profile patch can still override it. To go back to hosted search, `dsh plugin --profile web remove dsh-searxng-search` (then restart) and the layer — pin included — is gone.
+
+Local development: `pnpm install && pnpm build`, then `dsh plugin --profile web add link:/path/to/dsh-searxng-search`.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `index.ts` | The plugin: `WebSearchProvider` over `GET {base}/search?format=json`, on-demand `podman start` for loopback bases |
-| `cordis.patch.yml` | `--patch` overlay (relative entry + `searxng-local` provider pin, no install) |
+| `index.ts` | The plugin source: `WebSearchProvider` over `GET {base}/search?format=json`, on-demand `podman start` for loopback bases |
+| `lib/index.js` | Built artifact (`pnpm build`), committed — what installed profiles actually load |
+| `package.json` | Bundle manifest (`dsh.bundle.patch`); build-only devDeps, zero runtime deps |
+| `cordis.patch.yml` | Bundle layer: package-name entry + `searxng-local` provider pin |
 | `searxng-podman.sh` | One-shot SearXNG setup: `settings.yml` (secret + `json` format), container run, health check |
-| `selfcheck.ts` | Mapping + URL-gating asserts: `node --experimental-strip-types selfcheck.ts` |
+| `selfcheck.ts` | Mapping + URL-gating + packaging asserts: `pnpm selfcheck` |
 
 ## Config
 

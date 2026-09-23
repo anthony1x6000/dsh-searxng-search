@@ -1,17 +1,17 @@
 // ponytail: the smallest check that fails if the mapping or URL-gating breaks.
 // Run: `node --experimental-strip-types plugins/searxng-search/selfcheck.ts`.
 import assert from 'node:assert'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   isLocalBaseURL,
   mapSearxngResponse,
   mapSearxngResult,
+  name,
   resolveEnsureOptions,
   SEARXNG_DEFAULT_CONTAINER,
   SEARXNG_DEFAULT_IMAGE,
+  SEARXNG_PROVIDER_ID,
 } from './index.ts'
 
 assert.deepStrictEqual(
@@ -57,39 +57,36 @@ assert.strictEqual(resolveEnsureOptions({ startTimeoutMs: -1 }).startTimeoutMs, 
 assert.strictEqual(resolveEnsureOptions({ port: 99999 }).port, 8888)
 assert.strictEqual(resolveEnsureOptions({ autoCreate: false }).autoCreate, false)
 
-// The README install one-liner must survive a base-install `[]` patch file.
-// The shell body is extracted straight from the README so docs and behavior
-// cannot drift, then run against temp HOMEs (missing file, base `[]`
-// template, and a rerun for idempotency).
-const readme = readFileSync(join(import.meta.dirname, 'README.md'), 'utf8')
-const oneliner = readme.split('\n').find((line) => line.startsWith('git clone ') && line.includes('mkdir -p'))
-assert(oneliner !== undefined, 'README must contain the install one-liner')
-const installerSh = oneliner.replace(/^git clone [^&]+&& /u, '')
-function runInstaller(initial?: string): string {
-  const home = mkdtempSync(join(tmpdir(), 'searxng-install-'))
-  const dir = join(home, '.dsh', 'profiles', 'web')
-  mkdirSync(dir, { recursive: true })
-  const patchPath = join(dir, 'cordis.patch.yml')
-  if (initial !== undefined) writeFileSync(patchPath, initial)
-  execFileSync('bash', ['-c', installerSh], { env: { ...process.env, HOME: home } })
-  return readFileSync(patchPath, 'utf8')
+// Packaging asserts: `dsh plugin add` only mounts what the manifest declares,
+// so the manifest, the shipped files, and the bundle layer are checked here.
+const manifest = JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')) as {
+  name: string
+  files: string[]
+  dsh?: { bundle?: { patch?: string } }
 }
-const BASE_PATCH = '# Your patch layer for this dsh profile.\n[]\n'
-for (const initial of [undefined, BASE_PATCH]) {
-  const out = runInstaller(initial)
-  assert.strictEqual(out.match(/id: web-search-searxng/gu)?.length ?? 0, 1, 'exactly one plugin insert')
-  assert.strictEqual(out.match(/searchProvider: searxng-local/gu)?.length ?? 0, 1, 'exactly one provider pin')
-  assert(!/^\[\]\s*$/mu.test(out), 'base `[]` must be gone')
+assert.strictEqual(manifest.name, 'dsh-searxng-search', 'package name is the module row reference')
+const patchRel = manifest.dsh?.bundle?.patch
+assert(typeof patchRel === 'string' && patchRel.length > 0, 'package.json must declare dsh.bundle.patch')
+const patchPath = join(import.meta.dirname, patchRel)
+const patch = readFileSync(patchPath, 'utf8')
+for (const shipped of [patchRel.replace(/^\.\//u, ''), 'lib/index.js']) {
+  assert((manifest.files as string[]).includes(shipped), `files must ship ${shipped}`)
+  assert.doesNotThrow(() => readFileSync(join(import.meta.dirname, shipped), 'utf8'), `${shipped} must exist`)
 }
-{
-  const home = mkdtempSync(join(tmpdir(), 'searxng-install-'))
-  const dir = join(home, '.dsh', 'profiles', 'web')
-  mkdirSync(dir, { recursive: true })
-  const env = { ...process.env, HOME: home }
-  execFileSync('bash', ['-c', installerSh], { env })
-  execFileSync('bash', ['-c', installerSh], { env })
-  const out = readFileSync(join(dir, 'cordis.patch.yml'), 'utf8')
-  assert.strictEqual(out.match(/id: web-search-searxng/gu)?.length ?? 0, 1, 'rerun must not duplicate the insert')
-  assert.strictEqual(out.match(/searchProvider: searxng-local/gu)?.length ?? 0, 1, 'rerun must not duplicate the pin')
-}
+assert(patch.includes(`name: '${manifest.name}'`), 'bundle layer must reference the module by package name')
+assert(!patch.includes('./index.ts'), 'bundle layer must not reference source paths')
+assert(patch.includes('searchProvider: searxng-local'), 'bundle layer must pin the local provider')
+assert(patch.includes('fetchProvider: http'), 'a web row override must restate every key it owns')
+
+// The committed build artifact is what installed profiles load: import it and
+// exercise the provider surface (no network; `available()` is a local check).
+const built = await import('./lib/index.js') as typeof import('./index.ts')
+assert.strictEqual(built.name, name, 'built artifact must export the plugin name')
+assert.strictEqual(built.SEARXNG_PROVIDER_ID, SEARXNG_PROVIDER_ID, 'built artifact must export the provider id')
+assert.strictEqual(typeof built.apply, 'function', 'built artifact must export apply')
+assert.strictEqual(typeof built.mapSearxngResult, 'function', 'built artifact must export the mapping')
+assert.deepStrictEqual(
+  built.mapSearxngResult({ url: 'https://a.test/', content: ' excerpt ' }),
+  { url: 'https://a.test/', snippet: 'excerpt' },
+)
 console.log('searxng-search selfcheck: ok')

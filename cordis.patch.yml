@@ -1,17 +1,14 @@
-# Local SearXNG search overlay: keyless `web_search` through your own instance.
-# Usage (no install, no profile edit):
-#   pnpm dsh web --patch ./plugins/searxng-search/cordis.patch.yml
-# The relative entry is anchored to this file, like the inspector source patch.
+# Local SearXNG search bundle: keyless `web_search` through your own instance.
+# Install: dsh plugin --profile web add "github:anthony1x6000/dsh-searxng-search#main"
+# Rows reference the module by package name (Node resolution from the profile);
+# the `web` row pins the local provider because the base bundle defaults to
+# `searchProvider: deepseek-official` (hosted API, needs a key). Later layers
+# (your profile patch) can still override any of this.
 # Env: SEARXNG_BASE_URL (default http://127.0.0.1:8888).
-#
-# The `web` row is required, not optional: the base bundle pins
-# `searchProvider: deepseek-official`, so without this override every search
-# routes to the hosted API (and fails without a DeepSeek key) instead of the
-# local instance. Revert to hosted search by dropping this row.
 
 - insert:
     - id: web-search-searxng
-      name: './index.ts'
+      name: 'dsh-searxng-search'
 - id: web
   config:
     searchProvider: searxng-local
