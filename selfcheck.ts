@@ -58,25 +58,20 @@ assert.strictEqual(resolveEnsureOptions({ port: 99999 }).port, 8888)
 assert.strictEqual(resolveEnsureOptions({ autoCreate: false }).autoCreate, false)
 
 // The README install one-liner must survive a base-install `[]` patch file.
-// The `node -e` body is extracted straight from the README so docs and
-// behavior cannot drift, then run against temp HOMEs (missing file, base
-// `[]` template, and a rerun for idempotency).
+// The shell body is extracted straight from the README so docs and behavior
+// cannot drift, then run against temp HOMEs (missing file, base `[]`
+// template, and a rerun for idempotency).
 const readme = readFileSync(join(import.meta.dirname, 'README.md'), 'utf8')
-const oneliner = readme.split('\n').find((line) => line.startsWith('git clone ') && line.includes('node -e'))
+const oneliner = readme.split('\n').find((line) => line.startsWith('git clone ') && line.includes('mkdir -p'))
 assert(oneliner !== undefined, 'README must contain the install one-liner')
-const installerJs = oneliner
-  .replace(/^git clone [^&]+&& node -e '/u, '')
-  .replace(/'$/u, '')
-  .replaceAll(`'\\''`, `'`)
+const installerSh = oneliner.replace(/^git clone [^&]+&& /u, '')
 function runInstaller(initial?: string): string {
   const home = mkdtempSync(join(tmpdir(), 'searxng-install-'))
   const dir = join(home, '.dsh', 'profiles', 'web')
   mkdirSync(dir, { recursive: true })
   const patchPath = join(dir, 'cordis.patch.yml')
   if (initial !== undefined) writeFileSync(patchPath, initial)
-  const runner = join(home, 'run.cjs')
-  writeFileSync(runner, installerJs)
-  execFileSync(process.execPath, [runner], { env: { ...process.env, HOME: home } })
+  execFileSync('bash', ['-c', installerSh], { env: { ...process.env, HOME: home } })
   return readFileSync(patchPath, 'utf8')
 }
 const BASE_PATCH = '# Your patch layer for this dsh profile.\n[]\n'
@@ -90,11 +85,9 @@ for (const initial of [undefined, BASE_PATCH]) {
   const home = mkdtempSync(join(tmpdir(), 'searxng-install-'))
   const dir = join(home, '.dsh', 'profiles', 'web')
   mkdirSync(dir, { recursive: true })
-  const runner = join(home, 'run.cjs')
-  writeFileSync(runner, installerJs)
   const env = { ...process.env, HOME: home }
-  execFileSync(process.execPath, [runner], { env })
-  execFileSync(process.execPath, [runner], { env })
+  execFileSync('bash', ['-c', installerSh], { env })
+  execFileSync('bash', ['-c', installerSh], { env })
   const out = readFileSync(join(dir, 'cordis.patch.yml'), 'utf8')
   assert.strictEqual(out.match(/id: web-search-searxng/gu)?.length ?? 0, 1, 'rerun must not duplicate the insert')
   assert.strictEqual(out.match(/searchProvider: searxng-local/gu)?.length ?? 0, 1, 'rerun must not duplicate the pin')
