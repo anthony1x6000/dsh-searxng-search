@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,17 +24,21 @@ jobs:
 
   install:
     runs-on: ubuntu-latest
+    env:
+      DSH: /tmp/dsh-cli/node_modules/.bin/dsh
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: pnpm add -g @deepseek-ai/dsh@0.1.5-rc.3
-      - run: dsh plugin --profile ci-searxng add .
-      - run: dsh --profile ci-searxng --dump-config | grep searxng-local
+      # Hermetic CLI install (no global bin PATH involved); native builds
+      # below are the exact set pnpm gates, approved explicitly.
+      - run: mkdir -p /tmp/dsh-cli && cd /tmp/dsh-cli && pnpm init -y > /dev/null && pnpm add @deepseek-ai/dsh@0.1.5-rc.3 --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs
+      - run: $DSH plugin --profile ci-searxng add .
+      - run: $DSH --profile ci-searxng --dump-config | grep searxng-local
       # Tarball installs only see `files`-whitelisted content: prove the
       # published payload mounts the layer on its own.
       - run: pnpm pack --pack-destination /tmp/searxng-pkg
-      - run: dsh plugin --profile ci-searxng-pack add /tmp/searxng-pkg/*.tgz
-      - run: dsh --profile ci-searxng-pack --dump-config | grep searxng-local
+      - run: $DSH plugin --profile ci-searxng-pack add /tmp/searxng-pkg/*.tgz
+      - run: $DSH --profile ci-searxng-pack --dump-config | grep searxng-local
