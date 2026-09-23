@@ -3,7 +3,16 @@
 #   pnpm dsh web --patch ./plugins/searxng-search/cordis.patch.yml
 # The relative entry is anchored to this file, like the inspector source patch.
 # Env: SEARXNG_BASE_URL (default http://127.0.0.1:8888).
+#
+# The `web` row is required, not optional: the base bundle pins
+# `searchProvider: deepseek-official`, so without this override every search
+# routes to the hosted API (and fails without a DeepSeek key) instead of the
+# local instance. Revert to hosted search by dropping this row.
 
 - insert:
     - id: web-search-searxng
       name: './index.ts'
+- id: web
+  config:
+    searchProvider: searxng-local
+    fetchProvider: http

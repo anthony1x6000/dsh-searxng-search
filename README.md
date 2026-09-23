@@ -18,19 +18,23 @@ const entry = "    - id: web-search-searxng\n      name: '\''" + path.join(proce
 if (!c.includes("id: web-search-searxng")) {
   c = c.replace(/^\[\]\s*$/m, "");
   c = c.includes("- insert:\n") ? c.replace("- insert:\n", "- insert:\n" + entry) : (c.trim() ? c.trim() + "\n" : "") + "- insert:\n" + entry;
-  fs.writeFileSync(p, c);
 }
+if (!c.includes("searchProvider: searxng-local")) {
+  if (!c.endsWith("\n")) c += "\n";
+  c += "- id: web\n  config:\n    searchProvider: searxng-local\n    fetchProvider: http\n";
+}
+fs.writeFileSync(p, c);
 '
 ```
 
-Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat for `headless` profile if you use it (swap `web` with `headless` in the path). If DeepSeek search is also configured, pin this one by adding `searchProvider: searxng-local` to the `dsh-web` row config.
+Then just `dsh web`. First search creates the container if missing (~1–2 min for the image pull), later ones start it on demand after reboots. Repeat for `headless` profile if you use it (swap `web` with `headless` in the path). The installer pins `searchProvider: searxng-local` because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. To go back to hosted search, drop the `- id: web` block from the patch file.
 
 ## Files
 
 | File | Role |
 |---|---|
 | `index.ts` | The plugin: `WebSearchProvider` over `GET {base}/search?format=json`, on-demand `podman start` for loopback bases |
-| `cordis.patch.yml` | `--patch` overlay (relative entry, no install) |
+| `cordis.patch.yml` | `--patch` overlay (relative entry + `searxng-local` provider pin, no install) |
 | `searxng-podman.sh` | One-shot SearXNG setup: `settings.yml` (secret + `json` format), container run, health check |
 | `selfcheck.ts` | Mapping + URL-gating asserts: `node --experimental-strip-types selfcheck.ts` |
 
