@@ -16,6 +16,15 @@
  * Boot never fails on this — a container that cannot start surfaces per
  * search as `WEB_PROVIDER_ERROR`.
  *
+ * Container start/creation runs inside a transient per-container `systemd
+ * --user` scope, so the `conmon`/`pasta` helpers that actually own the loopback
+ * port-forward are siblings of the caller rather than children of it. Without
+ * that, a container started from inside `dsh-web.service` inherits its cgroup;
+ * the default `KillMode=control-group` restart then SIGKILLs those helpers and
+ * leaves SearXNG running but unreachable — `web_search` reports the provider
+ * down while `podman ps` still shows the container `Up`. Set `SEARXNG_DETACH=0`
+ * to opt out where no user systemd manager is reachable.
+ *
  * SearXNG must enable the `json` format (`search.formats`, default on; a
  * disabled format answers 403).
  *
@@ -62,6 +71,9 @@ export const SEARXNG_DEFAULT_PORT = 8888
 /** Default data dir holding `settings/settings.yml` and the image cache. */
 export const SEARXNG_DEFAULT_DATA_DIR = '.local/share/searxng'
 
+/** Default: run container start in a transient `systemd --user` scope (see `detach`). */
+export const SEARXNG_DEFAULT_DETACH = true
+
 /** Plugin config: every field optional, env fills the gaps. */
 export interface Config {
   /** SearXNG base URL. Falls back to `$SEARXNG_BASE_URL`, then localhost. */
@@ -78,6 +90,12 @@ export interface Config {
   image?: string
   /** Host port the container binds. Falls back to `$SEARXNG_PORT`, default 8888. */
   port?: number
+  /**
+   * Start the container inside a transient `systemd --user` scope so its
+   * `conmon`/`pasta` never inherit — and are never killed with — the caller's
+   * cgroup. Falls back to `$SEARXNG_DETACH`; default true (`0` disables).
+   */
+  detach?: boolean
 }
 
 /** Resolved on-demand-start options (env and constant defaults applied). */
@@ -96,6 +114,8 @@ export interface EnsureSearxngOptions {
   port: number
   /** Data dir holding `settings/settings.yml` and the image cache. */
   dataDir: string
+  /** Start inside a transient systemd scope when a user manager is reachable. */
+  detach: boolean
 }
 
 /**
@@ -120,6 +140,7 @@ export function resolveEnsureOptions(config: Config = {}): EnsureSearxngOptions 
       : SEARXNG_DEFAULT_PORT,
     dataDir: process.env.SEARXNG_DATA_DIR
       ?? `${process.env.HOME ?? '~'}/${SEARXNG_DEFAULT_DATA_DIR}`,
+    detach: config.detach ?? process.env.SEARXNG_DETACH !== '0',
   }
 }
 
@@ -217,12 +238,84 @@ function isEnoentCli(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT'
 }
 
-/** True when a `start`/`inspect` failure means the container does not exist. */
-function isMissingContainer(error: unknown): boolean {
-  const stderr = typeof error === 'object' && error !== null
+/** Collapse an exec failure into the stderr/message text callers match on. */
+function errorText(error: unknown): string {
+  return typeof error === 'object' && error !== null
     ? String((error as { stderr?: unknown }).stderr ?? (error as { message?: unknown }).message ?? error)
     : String(error)
-  return /no such container|no container with name/i.test(stderr)
+}
+
+/** True when a `start`/`inspect` failure means the container does not exist. */
+function isMissingContainer(error: unknown): boolean {
+  return /no such container|no container with name/i.test(errorText(error))
+}
+
+/**
+ * Transient scope unit that owns one container's start. The `.scope` suffix is
+ * required; characters outside systemd's safe set become `-`.
+ * @param containerName - the container the scope starts.
+ * @returns a deterministic unit name (`dsh-searxng-<container>.scope`).
+ */
+export function searxngScopeUnit(containerName: string): string {
+  const safe = containerName.replace(/[^A-Za-z0-9_.-]/gu, '-').replace(/^-+/u, '')
+  return `dsh-searxng-${safe.length > 0 ? safe : 'searxng'}.scope`
+}
+
+/** True when `systemd-run` refused because this container's scope is already live. */
+function isScopeAlreadyLive(error: unknown): boolean {
+  return /already loaded or has a fragment file|already exists/iu.test(errorText(error))
+}
+
+/**
+ * True when `systemd-run` itself is unusable (no binary, or no user systemd
+ * manager on the bus). Failures of the wrapped CLI are relayed verbatim and
+ * must stay visible, so they are deliberately not matched here.
+ */
+function isDetachUnavailable(error: unknown): boolean {
+  if (isEnoentCli(error)) return true
+  return /failed to connect to bus|failed to connect to socket|failed to create bus connection|not booted with systemd/iu
+    .test(errorText(error))
+}
+
+/**
+ * Run a container-mutating CLI call so the helpers it spawns (`conmon`,
+ * `pasta`, which own the loopback port-forward) live outside the caller's
+ * cgroup. A transient `systemd --user` scope is a sibling of `dsh-web.service`,
+ * so restarting that service can no longer strand a running-but-unreachable
+ * container. Without a reachable user manager the call runs directly — the
+ * pre-fix behaviour — with a one-line warning.
+ * @param cli - `podman` or `docker`.
+ * @param args - the CLI arguments (at least the subcommand).
+ * @param options - resolved autostart options; `detach` gates the wrapper.
+ * @param signal - caller cancellation forwarded to the CLI.
+ */
+async function execContainerCli(
+  cli: string,
+  args: string[],
+  options: EnsureSearxngOptions,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (options.detach) {
+    try {
+      await execFileAsync('systemd-run', [
+        '--user', '--scope', '--collect', '--quiet',
+        '--unit', searxngScopeUnit(options.containerName),
+        cli, ...args,
+      ], { signal })
+      return
+    } catch (error: unknown) {
+      throwIfAborted(signal)
+      // The scope is already live: a start is in flight (or the container is
+      // up); the readiness poll in the caller decides.
+      if (isScopeAlreadyLive(error)) return
+      if (!isDetachUnavailable(error)) throw error
+      console.warn(
+        `[web-search-searxng] systemd-run unavailable; running \`${cli} ${args[0] ?? ''}\``
+        + ` in the caller's cgroup: ${errorText(error)}`,
+      )
+    }
+  }
+  await execFileAsync(cli, args, { signal })
 }
 
 /**
@@ -289,14 +382,14 @@ async function createContainer(
       + '    - json\n')
   }
   try {
-    await execFileAsync(cli, [
+    await execContainerCli(cli, [
       'run', '-d', '--name', options.containerName, '--restart', 'unless-stopped',
       '-p', `127.0.0.1:${options.port}:8080`,
       '-v', `${join(options.dataDir, 'settings')}:/etc/searxng:z`,
       '-v', `${join(options.dataDir, 'data')}:/var/cache/searxng:z`,
       '-e', `BASE_URL=http://127.0.0.1:${options.port}/`,
       options.image,
-    ], { signal })
+    ], options, signal)
   } catch (error: unknown) {
     throwIfAborted(signal)
     throw new SearxngError(
@@ -322,7 +415,7 @@ async function startContainer(
   let lastError: unknown
   for (const cli of clis) {
     try {
-      await execFileAsync(cli, ['start', options.containerName], { signal })
+      await execContainerCli(cli, ['start', options.containerName], options, signal)
       return { cli }
     } catch (error: unknown) {
       throwIfAborted(signal)

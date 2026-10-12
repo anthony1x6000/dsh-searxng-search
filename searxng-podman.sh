@@ -37,12 +37,26 @@ else
   echo "keeping existing $SETTINGS"
 fi
 
+# Start in a transient systemd scope when possible. conmon/pasta own the
+# loopback port-forward and would otherwise inherit the caller's cgroup — a
+# `dsh-web` restart with the default KillMode=control-group would SIGKILL them
+# and strand a running-but-unreachable SearXNG. Mirrors the plugin's wrapper.
+scoped() {
+  if command -v systemd-run >/dev/null 2>&1; then
+    if systemd-run --user --scope --collect --quiet --unit "dsh-searxng-${NAME}.scope" "$@"; then
+      return 0
+    fi
+    echo "note: systemd-run scope unavailable; starting without cgroup isolation" >&2
+  fi
+  "$@"
+}
+
 if $CLI container exists "$NAME" >/dev/null 2>&1; then
-  $CLI start "$NAME"
+  scoped $CLI start "$NAME"
 else
   # Public images (Docker Hub rate-limits anon pulls; GHCR mirrors it):
   #   https://hub.docker.com/r/searxng/searxng  /  ghcr.io/searxng/searxng
-  $CLI run -d --name "$NAME" --restart unless-stopped \
+  scoped $CLI run -d --name "$NAME" --restart unless-stopped \
     -p "127.0.0.1:${PORT}:8080" \
     -v "$DATA_DIR/settings:/etc/searxng:z" \
     -v "$DATA_DIR/data:/var/cache/searxng:z" \

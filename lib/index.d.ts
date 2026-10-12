@@ -14,6 +14,15 @@
  * Boot never fails on this — a container that cannot start surfaces per
  * search as `WEB_PROVIDER_ERROR`.
  *
+ * Container start/creation runs inside a transient per-container `systemd
+ * --user` scope, so the `conmon`/`pasta` helpers that actually own the loopback
+ * port-forward are siblings of the caller rather than children of it. Without
+ * that, a container started from inside `dsh-web.service` inherits its cgroup;
+ * the default `KillMode=control-group` restart then SIGKILLs those helpers and
+ * leaves SearXNG running but unreachable — `web_search` reports the provider
+ * down while `podman ps` still shows the container `Up`. Set `SEARXNG_DETACH=0`
+ * to opt out where no user systemd manager is reachable.
+ *
  * SearXNG must enable the `json` format (`search.formats`, default on; a
  * disabled format answers 403).
  *
@@ -41,6 +50,8 @@ export declare const SEARXNG_DEFAULT_IMAGE = "docker.io/searxng/searxng:latest";
 export declare const SEARXNG_DEFAULT_PORT = 8888;
 /** Default data dir holding `settings/settings.yml` and the image cache. */
 export declare const SEARXNG_DEFAULT_DATA_DIR = ".local/share/searxng";
+/** Default: run container start in a transient `systemd --user` scope (see `detach`). */
+export declare const SEARXNG_DEFAULT_DETACH = true;
 /** Plugin config: every field optional, env fills the gaps. */
 export interface Config {
     /** SearXNG base URL. Falls back to `$SEARXNG_BASE_URL`, then localhost. */
@@ -57,6 +68,12 @@ export interface Config {
     image?: string;
     /** Host port the container binds. Falls back to `$SEARXNG_PORT`, default 8888. */
     port?: number;
+    /**
+     * Start the container inside a transient `systemd --user` scope so its
+     * `conmon`/`pasta` never inherit — and are never killed with — the caller's
+     * cgroup. Falls back to `$SEARXNG_DETACH`; default true (`0` disables).
+     */
+    detach?: boolean;
 }
 /** Resolved on-demand-start options (env and constant defaults applied). */
 export interface EnsureSearxngOptions {
@@ -74,6 +91,8 @@ export interface EnsureSearxngOptions {
     port: number;
     /** Data dir holding `settings/settings.yml` and the image cache. */
     dataDir: string;
+    /** Start inside a transient systemd scope when a user manager is reachable. */
+    detach: boolean;
 }
 /**
  * Project one config section into the options the on-demand start uses.
@@ -126,6 +145,13 @@ export declare function mapSearxngResult(result: SearxngResult): WebSearchSource
  * @returns the normalized result; URL-less entries are dropped.
  */
 export declare function mapSearxngResponse(response: SearxngResponse): WebSearchResult;
+/**
+ * Transient scope unit that owns one container's start. The `.scope` suffix is
+ * required; characters outside systemd's safe set become `-`.
+ * @param containerName - the container the scope starts.
+ * @returns a deterministic unit name (`dsh-searxng-<container>.scope`).
+ */
+export declare function searxngScopeUnit(containerName: string): string;
 /**
  * Ensure the instance answers before a search. Concurrent callers share one
  * attempt; a settled attempt is forgotten so the next search re-probes.

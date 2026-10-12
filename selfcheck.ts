@@ -9,7 +9,9 @@ import {
   mapSearxngResult,
   name,
   resolveEnsureOptions,
+  searxngScopeUnit,
   SEARXNG_DEFAULT_CONTAINER,
+  SEARXNG_DEFAULT_DETACH,
   SEARXNG_DEFAULT_IMAGE,
   SEARXNG_PROVIDER_ID,
 } from './index.ts'
@@ -40,6 +42,7 @@ assert.deepStrictEqual(resolveEnsureOptions({}), {
   image: SEARXNG_DEFAULT_IMAGE,
   port: 8888,
   dataDir: `${process.env.HOME}/.local/share/searxng`,
+  detach: SEARXNG_DEFAULT_DETACH,
 })
 assert.deepStrictEqual(
   resolveEnsureOptions({ containerName: 'sxng', containerCLI: 'docker', startTimeoutMs: 5_000 }),
@@ -51,11 +54,27 @@ assert.deepStrictEqual(
     image: SEARXNG_DEFAULT_IMAGE,
     port: 8888,
     dataDir: `${process.env.HOME}/.local/share/searxng`,
+    detach: SEARXNG_DEFAULT_DETACH,
   },
 )
 assert.strictEqual(resolveEnsureOptions({ startTimeoutMs: -1 }).startTimeoutMs, 60_000)
 assert.strictEqual(resolveEnsureOptions({ port: 99999 }).port, 8888)
 assert.strictEqual(resolveEnsureOptions({ autoCreate: false }).autoCreate, false)
+assert.strictEqual(resolveEnsureOptions({ detach: false }).detach, false)
+
+// The scope wrapper is the fix for the cgroup trap: conmon/pasta must start as
+// a sibling of the DSH service, so the name has to be a valid, deterministic
+// `.scope` unit for any container name (systemd rejects anything else).
+assert.strictEqual(searxngScopeUnit('searxng'), 'dsh-searxng-searxng.scope')
+assert.strictEqual(searxngScopeUnit('my/cool name!'), 'dsh-searxng-my-cool-name-.scope')
+assert.strictEqual(searxngScopeUnit(''), 'dsh-searxng-searxng.scope')
+assert.strictEqual(searxngScopeUnit('///'), 'dsh-searxng-searxng.scope')
+for (const containerName of ['searxng', 'a b', 'x'.repeat(200)]) {
+  assert(
+    /^dsh-searxng-[A-Za-z0-9_.-]+\.scope$/u.test(searxngScopeUnit(containerName)),
+    `scope unit must stay valid for container name ${JSON.stringify(containerName)}`,
+  )
+}
 
 // Packaging asserts: `dsh plugin add` only mounts what the manifest declares,
 // so the manifest, the shipped files, and the bundle layer are checked here.
@@ -85,6 +104,13 @@ assert.strictEqual(built.name, name, 'built artifact must export the plugin name
 assert.strictEqual(built.SEARXNG_PROVIDER_ID, SEARXNG_PROVIDER_ID, 'built artifact must export the provider id')
 assert.strictEqual(typeof built.apply, 'function', 'built artifact must export apply')
 assert.strictEqual(typeof built.mapSearxngResult, 'function', 'built artifact must export the mapping')
+assert.strictEqual(
+  built.SEARXNG_DEFAULT_DETACH,
+  SEARXNG_DEFAULT_DETACH,
+  'built artifact must export the detach default',
+)
+assert.strictEqual(typeof built.searxngScopeUnit, 'function', 'built artifact must export the scope helper')
+assert.strictEqual(built.searxngScopeUnit('searxng'), searxngScopeUnit('searxng'))
 assert.deepStrictEqual(
   built.mapSearxngResult({ url: 'https://a.test/', content: ' excerpt ' }),
   { url: 'https://a.test/', snippet: 'excerpt' },
