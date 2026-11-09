@@ -62,6 +62,27 @@ assert.strictEqual(resolveEnsureOptions({ port: 99999 }).port, 8888)
 assert.strictEqual(resolveEnsureOptions({ autoCreate: false }).autoCreate, false)
 assert.strictEqual(resolveEnsureOptions({ detach: false }).detach, false)
 
+// Env opt-outs accept the documented `false` as well as `0`, case-insensitively.
+for (const [envName, field] of [
+  ['SEARXNG_AUTO_CREATE', 'autoCreate'],
+  ['SEARXNG_DETACH', 'detach'],
+] as const) {
+  const previous = process.env[envName]
+  try {
+    process.env[envName] = 'false'
+    assert.strictEqual(resolveEnsureOptions({})[field], false, `${envName}=false must disable ${field}`)
+    process.env[envName] = ' FALSE '
+    assert.strictEqual(resolveEnsureOptions({})[field], false, `${envName}=FALSE must disable ${field}`)
+    process.env[envName] = '0'
+    assert.strictEqual(resolveEnsureOptions({})[field], false, `${envName}=0 must disable ${field}`)
+    process.env[envName] = '1'
+    assert.strictEqual(resolveEnsureOptions({})[field], true, `${envName}=1 must keep ${field} enabled`)
+  } finally {
+    if (previous === undefined) delete process.env[envName]
+    else process.env[envName] = previous
+  }
+}
+
 // The scope wrapper is the fix for the cgroup trap: conmon/pasta must start as
 // a sibling of the DSH service, so the name has to be a valid, deterministic
 // `.scope` unit for any container name (systemd rejects anything else).
@@ -115,4 +136,16 @@ assert.deepStrictEqual(
   built.mapSearxngResult({ url: 'https://a.test/', content: ' excerpt ' }),
   { url: 'https://a.test/', snippet: 'excerpt' },
 )
+const builtAutoCreateEnv = process.env.SEARXNG_AUTO_CREATE
+try {
+  process.env.SEARXNG_AUTO_CREATE = 'false'
+  assert.strictEqual(
+    built.resolveEnsureOptions({}).autoCreate,
+    false,
+    'built artifact must honor SEARXNG_AUTO_CREATE=false',
+  )
+} finally {
+  if (builtAutoCreateEnv === undefined) delete process.env.SEARXNG_AUTO_CREATE
+  else process.env.SEARXNG_AUTO_CREATE = builtAutoCreateEnv
+}
 console.log('searxng-search selfcheck: ok')
