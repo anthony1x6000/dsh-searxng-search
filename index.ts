@@ -23,7 +23,7 @@
  * the default `KillMode=control-group` restart then SIGKILLs those helpers and
  * leaves SearXNG running but unreachable — `web_search` reports the provider
  * down while `podman ps` still shows the container `Up`. Set `SEARXNG_DETACH=0`
- * to opt out where no user systemd manager is reachable.
+ * (or `false`) to opt out where no user systemd manager is reachable.
  *
  * SearXNG must enable the `json` format (`search.formats`, default on; a
  * disabled format answers 403).
@@ -93,7 +93,7 @@ export interface Config {
   /**
    * Start the container inside a transient `systemd --user` scope so its
    * `conmon`/`pasta` never inherit — and are never killed with — the caller's
-   * cgroup. Falls back to `$SEARXNG_DETACH`; default true (`0` disables).
+   * cgroup. Falls back to `$SEARXNG_DETACH`; default true (`0`/`false` disables).
    */
   detach?: boolean
 }
@@ -119,6 +119,18 @@ export interface EnsureSearxngOptions {
 }
 
 /**
+ * Parse an opt-out env flag. `0`, `false`, `no`, and `off` (any case) disable;
+ * unset or any other value keeps `defaultValue`.
+ * @param value - raw env value.
+ * @param defaultValue - value when the env var is unset.
+ * @returns whether the flag is enabled.
+ */
+function envFlag(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue
+  return !/^(?:0|false|no|off)$/iu.test(value.trim())
+}
+
+/**
  * Project one config section into the options the on-demand start uses.
  * @param config - the currently authoritative section.
  * @returns options with every value fully defaulted.
@@ -133,14 +145,14 @@ export function resolveEnsureOptions(config: Config = {}): EnsureSearxngOptions 
     startTimeoutMs: Number.isInteger(startTimeoutMs) && (startTimeoutMs as number) > 0
       ? startTimeoutMs as number
       : SEARXNG_DEFAULT_START_TIMEOUT_MS,
-    autoCreate: config.autoCreate ?? process.env.SEARXNG_AUTO_CREATE !== '0',
+    autoCreate: config.autoCreate ?? envFlag(process.env.SEARXNG_AUTO_CREATE, true),
     image: config.image ?? process.env.SEARXNG_IMAGE ?? SEARXNG_DEFAULT_IMAGE,
     port: Number.isInteger(port) && (port as number) > 0 && (port as number) < 65536
       ? port as number
       : SEARXNG_DEFAULT_PORT,
     dataDir: process.env.SEARXNG_DATA_DIR
       ?? `${process.env.HOME ?? '~'}/${SEARXNG_DEFAULT_DATA_DIR}`,
-    detach: config.detach ?? process.env.SEARXNG_DETACH !== '0',
+    detach: config.detach ?? envFlag(process.env.SEARXNG_DETACH, true),
   }
 }
 

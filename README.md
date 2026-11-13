@@ -36,7 +36,7 @@ Every container-mutating CLI call is therefore wrapped in a transient per-contai
 systemd-run --user --scope --collect --quiet --unit dsh-searxng-<container>.scope podman …
 ```
 
-A scope is a *sibling* of `dsh-web.service` under `user@1000.service/app.slice`, so restarting DSH never touches it. Inspect it with `systemctl --user status dsh-searxng-searxng.scope`. Where no user systemd manager is reachable (macOS, a bare CI container, `systemd-run` missing) the plugin calls the CLI directly and logs a one-line warning; `SEARXNG_DETACH=0` forces that behaviour. `searxng-podman.sh` uses the same wrapper.
+A scope is a *sibling* of `dsh-web.service` under `user@1000.service/app.slice`, so restarting DSH never touches it. Inspect it with `systemctl --user status dsh-searxng-searxng.scope`. Where no user systemd manager is reachable (macOS, a bare CI container, `systemd-run` missing) the plugin calls the CLI directly and logs a one-line warning; `SEARXNG_DETACH=0`/`false` forces that behaviour. `searxng-podman.sh` uses the same wrapper.
 
 The bundle pins `searchProvider: searxng-local` in its own layer because the base bundle defaults to `deepseek-official` (hosted API, needs a key) — without the pin, searches never reach your local instance. Your profile patch can still override it. To go back to hosted search, `dsh plugin --profile web remove dsh-searxng-search` (then restart) and the layer — pin included — is gone.
 
@@ -64,6 +64,6 @@ Local development: `pnpm install && pnpm build`, then `dsh plugin --profile web 
 | `SEARXNG_AUTO_CREATE` / `autoCreate` | `true` | Create the container when missing (set `0`/`false` to start-only) |
 | `SEARXNG_IMAGE` / `image` | `docker.io/searxng/searxng:latest` | Image pulled on first creation |
 | `SEARXNG_PORT` / `port` | `8888` | Host port the container binds |
-| `SEARXNG_DETACH` / `detach` | `true` | Start the container in a transient `systemd --user` scope so it leaves the caller's cgroup (`0` calls the CLI directly) |
+| `SEARXNG_DETACH` / `detach` | `true` | Start the container in a transient `systemd --user` scope so it leaves the caller's cgroup (`0`/`false` calls the CLI directly) |
 
 Autostart only manages loopback bases (`localhost`, `127.0.0.1`, `::1`); remote bases fail fast. Redirects are rejected (`redirect: 'error'`); SearXNG returns no generated answer, so results carry sources only.
